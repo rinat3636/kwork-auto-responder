@@ -72,6 +72,9 @@ def nearest_duration(days: int) -> int:
 PRICE_FLOOR = int(os.environ.get("KWORK_PRICE_FLOOR", "500"))
 # Скидка от максимально допустимого бюджета (0.10 = −10%).
 PRICE_DISCOUNT = float(os.environ.get("KWORK_PRICE_DISCOUNT", "0.10"))
+# Порог «нереально низкого» бюджета: при допустимом ≤ этого значения цену не
+# фиксируем символически, а предлагаем обсудить индивидуально.
+LOW_PRICE_THRESHOLD = int(os.environ.get("KWORK_LOW_PRICE_THRESHOLD", "500"))
 
 
 def compute_price(project: dict, price_cap: int) -> int:
@@ -191,6 +194,20 @@ def ai_compose(project: dict) -> dict:
     # Цену задаёт система: всегда «максимально допустимый бюджет − 10%».
     data["price"] = compute_price(project, price_cap)
     data["price_reason"] = "максимально допустимый бюджет минус 10%"
+    # Если допустимый бюджет нереально низкий (например, бот за ≤500 ₽) — не ставим
+    # символическую цену, а в тексте предлагаем обсудить стоимость индивидуально.
+    bmax = project.get("budget_max")
+    if bmax is None or bmax <= LOW_PRICE_THRESHOLD:
+        data["price"] = PRICE_FLOOR  # на форме всё равно нужна сумма (минимум)
+        data["price_reason"] = f"бюджет ≤{LOW_PRICE_THRESHOLD}₽ — цена обсуждается"
+        data["negotiable_price"] = True
+        note = (
+            " По стоимости: указанный бюджет ниже реальной трудоёмкости такой "
+            "задачи — предлагаю обсудить цену индивидуально, подстроюсь под ваш "
+            "бюджет и объём работ."
+        )
+        if note.strip() not in data.get("description", ""):
+            data["description"] = data.get("description", "").rstrip() + note
     if len(data.get("description", "")) < 150:
         data["description"] += (
             " Готов обсудить детали ТЗ, показать примеры из портфолио и приступить "
