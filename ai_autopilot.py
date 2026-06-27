@@ -259,12 +259,85 @@ def _select_duration(page, days: int):
     page.wait_for_timeout(400)
 
 
-def fill_and_submit(page, project_id: int, offer: dict, dry_run: bool):
+# HTTP-сабмит можно отключить, выставив KWORK_HTTP_SUBMIT=0 (тогда только браузер).
+USE_HTTP_SUBMIT = os.environ.get("KWORK_HTTP_SUBMIT", "1") not in ("0", "false", "no")
+
+
+def http_submit_offer(ctx, page, project_id: int, offer: dict) -> dict:
+    """Быстрый путь: отправка отклика напрямую POST /api/offer/createoffer.
+
+    Использует сессионные cookie из браузера + window.csrftoken со страницы.
+    Поведение по проекту: пробуем HTTP; при любой ошибке/непонятном ответе
+    вызывающий код откатывается на Playwright. Ничего не угадываем вслепую.
+    """
+    csrftoken = page.evaluate("() => window.csrftoken || null")
+    if not csrftoken:
+        return {"ok": False, "fallback": True, "detail": "нет window.csrftoken"}
+
+    # Cookie именно домена kwork.ru (без поддоменов api.).
+    jar = {}
+    for c in ctx.cookies():
+        dom = (c.get("domain") or "").lstrip(".")
+        if dom.endswith("kwork.ru"):
+            jar[c["name"]] = c["value"]
+    if "csrf_user_token" not in jar and "i" not in jar:
+        return {"ok": False, "fallback": True, "detail": "нет сессионных cookie"}
+
+    ua = page.evaluate("() => navigator.userAgent")
+    form = {
+        "wantId": str(project_id),
+        "offerType": "custom",
+        "description": offer["description"],
+        "kwork_duration": str(int(offer["duration_days"])),  # число дней, не ID
+        "kwork_price": str(offer["price"]),
+        "kwork_name": offer.get("name", "")[:70],
+        "csrftoken": csrftoken,
+    }
+    headers = {
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent": ua,
+        "Referer": f"{WEB_BASE}/new_offer?project={project_id}",
+        "Origin": WEB_BASE,
+        "Accept": "application/json, text/plain, */*",
+    }
+    try:
+        r = requests.post(
+            f"{WEB_BASE}/api/offer/createoffer",
+            data=form, cookies=jar, headers=headers, timeout=30,
+        )
+    except Exception as e:
+        return {"ok": False, "fallback": True, "detail": f"http exc: {e}"}
+
+    body = (r.text or "")[:400]
+    js = {}
+    try:
+        js = r.json()
+    except Exception:
+        pass
+    # Kwork обычно отвечает {"success": true, ...} либо {"success": false, "error": ...}.
+    if r.status_code == 200 and (js.get("success") is True or '"success":true' in body.replace(" ", "")):
+        return {"ok": True, "fallback": False, "detail": "createoffer success", "via": "http"}
+    return {"ok": False, "fallback": True,
+            "detail": f"http {r.status_code}: {body}"[:300], "resp": js or body}
+
+
+def fill_and_submit(page, project_id: int, offer: dict, dry_run: bool, ctx=None):
     page.goto(f"{WEB_BASE}/new_offer?project={project_id}", wait_until="networkidle")
 
     connects = read_connects(page)
     if connects is not None:
         print("CONNECTS before submit:", connects)
+
+    # ── Быстрый путь: прямой HTTP-сабмит (createoffer). ──────────────────────
+    # CSRF и cookie уже актуальны (страница открыта в залогиненном браузере).
+    # При любой ошибке — молча откатываемся на надёжную браузерную отправку.
+    if not dry_run and USE_HTTP_SUBMIT and ctx is not None:
+        res = http_submit_offer(ctx, page, project_id, offer)
+        if res.get("ok"):
+            after = read_connects_on_exchange(page)
+            print("HTTP submit OK | connects:", after)
+            return {"ok": True, "dry_run": False, "via": "http", "connects": after}
+        print("HTTP submit -> fallback на Playwright:", res.get("detail"))
 
     desc = page.locator("div.trumbowyg-editor.js-stopwords-check").first
     desc.click(); desc.fill(""); desc.type(offer["description"], delay=6)
@@ -324,7 +397,7 @@ def main(project_id: int, dry_run: bool):
             print("SKIP (ИИ): ", offer.get("skip_reason", "не наш профиль"))
             return
 
-        fill_and_submit(page, project_id, offer, dry_run)
+        fill_and_submit(page, project_id, offer, dry_run, ctx=ctx)
 
 
 if __name__ == "__main__":

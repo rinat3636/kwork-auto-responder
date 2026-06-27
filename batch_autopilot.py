@@ -78,7 +78,7 @@ def collect_new_ids(page, seen: set, cap: int) -> list:
     return ids[:cap]
 
 
-def process_one(page, pid: int, dry_run: bool) -> dict:
+def process_one(page, pid: int, dry_run: bool, ctx=None) -> dict:
     res = {"id": pid, "status": "", "detail": ""}
     try:
         project = A.read_project(page, pid)
@@ -95,7 +95,7 @@ def process_one(page, pid: int, dry_run: bool) -> dict:
             return res
         res["price"] = offer.get("price")
         res["duration_days"] = offer.get("duration_days")
-        out = A.fill_and_submit(page, pid, offer, dry_run)
+        out = A.fill_and_submit(page, pid, offer, dry_run, ctx=ctx)
         if isinstance(out, dict):
             res["connects"] = out.get("connects")
             ok = out.get("ok")
@@ -151,7 +151,7 @@ def main(dry_run: bool, max_send: int):
                 rested_reason = "достигнут бюджет прогона"
                 break
             print(f"\n=== project {pid} | свободно коннектов={remaining} | отправлено={sent} ===")
-            r = process_one(page, pid, dry_run)
+            r = process_one(page, pid, dry_run, ctx=ctx)
             print("RESULT:", json.dumps(r, ensure_ascii=False))
             results.append(r)
 
