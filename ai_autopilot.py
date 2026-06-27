@@ -224,18 +224,15 @@ def ai_compose(project: dict) -> dict:
         ai_price = compute_price(project, price_cap)
         data["price_reason"] = "оценка по бюджету (ИИ не вернул цену)"
     data["price"] = max(PRICE_FLOOR, ai_price)
-    # Если честная цена по сложности заметно выше бюджета заказчика — не занижаем,
-    # а в тексте предлагаем обсудить стоимость и подстроиться.
+    # Не превышаем допустимый бюджет заказчика: берём минимум из честной цены и
+    # допустимого бюджета (но не ниже PRICE_FLOOR).
     bmax = project.get("budget_max")
     if bmax and data["price"] > bmax:
-        data["negotiable_price"] = True
-        note = (
-            " По стоимости: оценка по объёму и сложности задачи выше указанного "
-            "бюджета — предлагаю обсудить цену индивидуально, подстроюсь под ваш "
-            "бюджет и финальный объём работ."
+        data["price"] = max(PRICE_FLOOR, int(round(bmax / 10.0) * 10))
+        data["price_reason"] = (
+            (data.get("price_reason", "") or "оценка по сложности")
+            + " (ограничено допустимым бюджетом заказчика)"
         )
-        if note.strip() not in data.get("description", ""):
-            data["description"] = data.get("description", "").rstrip() + note
     if len(data.get("description", "")) < 150:
         data["description"] += (
             " Готов обсудить детали ТЗ, показать примеры из портфолио и приступить "
