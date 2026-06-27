@@ -1,0 +1,24 @@
+# secrets & local state
+.env
+*.env
+connects_state.json
+storage_state.json
+uad.txt
+chrome-profile/
+
+# logs
+*.log
+
+# runtime / artifacts
+__pycache__/
+*.pyc
+*.png
+*.html
+
+# decompiled app / large binaries
+*.xapk
+*.apk
+apktool_out/
+jadx_out/
+xapk/
+js/
